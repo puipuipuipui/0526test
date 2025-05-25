@@ -1,233 +1,316 @@
-// backend/src/models/TestResult.ts
-import mongoose, { Schema, Document } from 'mongoose';
+import express, { Request, Response } from 'express';
+import TestResult from '../models/TestResult';
 
-// 定義介面
-interface ITestResult extends Document {
-  userId: string;
-  testDate: Date;
-  completionTime?: number;
-  results: {
-    maleComputer: number[];
-    femaleSkincare: number[];
-    femaleComputer: number[];
-    maleSkincare: number[];
-  };
-  analysis: {
-    dScore: number;
-    biasType: string | null;
-    biasLevel: string;
-    biasDirection?: string;
-    d1Score?: number;
-    d2Score?: number;
-    d3Score?: number;
-    d4Score?: number;
-  };
-  surveyResponses?: Map<string, any>;
-  demographics?: {
-    age?: number;
-    gender?: string;
-    education?: string;
-    occupation?: string;
-  };
-  deviceInfo?: {
-    browser?: string;
-    language?: string;
-    screenSize?: string;
-    timezone?: string;
-    platform?: string;
-  };
-  createdAt: Date;
-  updatedAt: Date;
+const router = express.Router();
+
+// 直接在這裡定義類型，避免導入問題
+interface TestResultData {
+    userId: string;
+    testDate?: Date;
+    results: {
+        maleComputer: number[];
+        femaleSkincare: number[];
+        femaleComputer: number[];
+        maleSkincare: number[];
+    };
+    analysis: {
+        dScore: number;
+        biasType: string | null;
+        biasLevel: string;
+        biasDirection?: string;
+        d1Score?: number;
+        d2Score?: number;
+        d3Score?: number;
+        d4Score?: number;
+    };
+    surveyResponses?: any;
+    deviceInfo?: any;
 }
 
-// 定義 Schema
-const testResultSchema = new Schema<ITestResult>({
-  // 用戶識別 (匿名ID)
-  userId: {
-    type: String,
-    required: [true, '用戶 ID 是必需的'],
-    index: true
-  },
-  
-  // 測試時間
-  testDate: {
-    type: Date,
-    default: Date.now,
-    index: true
-  },
-  
-  // 測試完成時間（毫秒）
-  completionTime: {
-    type: Number,
-    min: [0, '完成時間不能為負數']
-  },
-  
-  // 原始測試結果數據
-  results: {
-    maleComputer: {
-      type: [Number],
-      required: true,
-      validate: {
-        validator: function(arr: number[]) {
-          return arr.every(time => time > 0 && time < 30000); // 0-30秒
-        },
-        message: '反應時間必須在 0-30000 毫秒之間'
-      }
-    },
-    femaleSkincare: {
-      type: [Number],
-      required: true,
-      validate: {
-        validator: function(arr: number[]) {
-          return arr.every(time => time > 0 && time < 30000);
-        },
-        message: '反應時間必須在 0-30000 毫秒之間'
-      }
-    },
-    femaleComputer: {
-      type: [Number],
-      required: true,
-      validate: {
-        validator: function(arr: number[]) {
-          return arr.every(time => time > 0 && time < 30000);
-        },
-        message: '反應時間必須在 0-30000 毫秒之間'
-      }
-    },
-    maleSkincare: {
-      type: [Number],
-      required: true,
-      validate: {
-        validator: function(arr: number[]) {
-          return arr.every(time => time > 0 && time < 30000);
-        },
-        message: '反應時間必須在 0-30000 毫秒之間'
-      }
+// POST /api/test-results - 儲存測試結果
+router.post('/', async (req: Request, res: Response): Promise<void> => {
+    try {
+        console.log('📥 收到測試結果儲存請求');
+        console.log('📊 請求資料:', JSON.stringify(req.body, null, 2));
+        
+        const {
+            userId,
+            testDate,
+            results,
+            analysis,
+            surveyResponses,
+            deviceInfo
+        } = req.body;
+
+        // 詳細的資料驗證
+        if (!userId) {
+            console.error('❌ 驗證失敗: 缺少用戶 ID');
+            res.status(400).json({
+                success: false,
+                message: '缺少用戶 ID',
+                error: 'MISSING_USER_ID'
+            });
+            return;
+        }
+
+        if (!results) {
+            console.error('❌ 驗證失敗: 缺少測試結果');
+            res.status(400).json({
+                success: false,
+                message: '缺少測試結果',
+                error: 'MISSING_RESULTS'
+            });
+            return;
+        }
+
+        if (!analysis) {
+            console.error('❌ 驗證失敗: 缺少分析資料');
+            res.status(400).json({
+                success: false,
+                message: '缺少分析資料',
+                error: 'MISSING_ANALYSIS'
+            });
+            return;
+        }
+
+        // 驗證測試結果結構
+        const requiredArrays = ['maleComputer', 'femaleSkincare', 'femaleComputer', 'maleSkincare'];
+        for (const arrayName of requiredArrays) {
+            if (!Array.isArray(results[arrayName])) {
+                console.error(`❌ 驗證失敗: ${arrayName} 不是陣列`);
+                res.status(400).json({
+                    success: false,
+                    message: `測試結果中的 ${arrayName} 必須是陣列`,
+                    error: 'INVALID_RESULTS_STRUCTURE'
+                });
+                return;
+            }
+        }
+
+        console.log('✅ 資料驗證通過');
+
+        // 建立新的測試結果記錄
+        const testResultData: TestResultData = {
+            userId,
+            testDate: testDate ? new Date(testDate) : new Date(),
+            results: {
+                maleComputer: results.maleComputer || [],
+                femaleSkincare: results.femaleSkincare || [],
+                femaleComputer: results.femaleComputer || [],
+                maleSkincare: results.maleSkincare || []
+            },
+            analysis: {
+                dScore: Number(analysis.dScore) || 0,
+                biasType: analysis.biasType || null,
+                biasLevel: analysis.biasLevel || '',
+                biasDirection: analysis.biasDirection || '',
+                d1Score: Number(analysis.d1Score) || 0,
+                d2Score: Number(analysis.d2Score) || 0,
+                d3Score: Number(analysis.d3Score) || 0,
+                d4Score: Number(analysis.d4Score) || 0
+            },
+            surveyResponses: surveyResponses || {},
+            deviceInfo: deviceInfo || {}
+        };
+
+        console.log('💾 準備儲存資料到 MongoDB Atlas...');
+        console.log('📝 儲存的資料結構:', {
+            userId: testResultData.userId,
+            resultsLength: {
+                maleComputer: testResultData.results.maleComputer.length,
+                femaleSkincare: testResultData.results.femaleSkincare.length,
+                femaleComputer: testResultData.results.femaleComputer.length,
+                maleSkincare: testResultData.results.maleSkincare.length
+            },
+            analysis: testResultData.analysis
+        });
+
+        // 創建新實例
+        const newTestResult = new (TestResult as any)(testResultData);
+        const savedResult = await newTestResult.save();
+        
+        console.log('✅ 儲存到 Atlas 成功！');
+        console.log('🆔 MongoDB ID:', savedResult._id);
+        console.log('👤 用戶 ID:', savedResult.userId);
+
+        // 驗證儲存是否成功
+        const verifyResult = await (TestResult as any).findById(savedResult._id);
+        if (verifyResult) {
+            console.log('✅ 驗證: 資料已成功寫入 MongoDB Atlas');
+        } else {
+            console.error('❌ 驗證失敗: 無法從 Atlas 讀取剛儲存的資料');
+        }
+
+        res.status(201).json({
+            success: true,
+            message: '測試結果儲存成功',
+            data: {
+                id: savedResult._id,
+                userId: savedResult.userId,
+                testDate: savedResult.testDate,
+                createdAt: savedResult.createdAt
+            }
+        });
+
+    } catch (error: any) {
+        console.error('❌ 儲存測試結果錯誤:', error);
+        
+        // MongoDB 重複鍵錯誤
+        if (error.code === 11000) {
+            console.error('🔄 重複鍵錯誤詳情:', error.keyValue);
+            res.status(409).json({
+                success: false,
+                message: '重複的測試記錄',
+                error: 'DUPLICATE_ENTRY',
+                details: error.keyValue
+            });
+            return;
+        }
+        
+        // MongoDB 驗證錯誤
+        if (error.name === 'ValidationError') {
+            console.error('📋 驗證錯誤詳情:', error.errors);
+            res.status(400).json({
+                success: false,
+                message: '資料驗證失敗',
+                error: 'VALIDATION_ERROR',
+                details: Object.keys(error.errors).map(key => ({
+                    field: key,
+                    message: error.errors[key].message
+                }))
+            });
+            return;
+        }
+
+        // Atlas 連接錯誤
+        if (error.name === 'MongoNetworkError' || error.name === 'MongooseServerSelectionError') {
+            console.error('🌐 MongoDB Atlas 連接錯誤');
+            res.status(503).json({
+                success: false,
+                message: 'MongoDB Atlas 連接失敗',
+                error: 'ATLAS_CONNECTION_ERROR'
+            });
+            return;
+        }
+        
+        // 其他錯誤
+        res.status(500).json({
+            success: false,
+            message: '伺服器內部錯誤',
+            error: 'INTERNAL_SERVER_ERROR',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
-  },
-  
-  // 分析結果
-  analysis: {
-    dScore: {
-      type: Number,
-      required: true,
-      min: [-3, 'D分數不能小於 -3'],
-      max: [3, 'D分數不能大於 3']
-    },
-    biasType: {
-      type: String,
-      enum: ['gender_tech', 'gender_skincare', null],
-      default: null
-    },
-    biasLevel: {
-      type: String,
-      required: true,
-      enum: ['無或極弱偏見', '輕度偏見', '中度偏見', '高度偏見']
-    },
-    biasDirection: String,
-    d1Score: Number,
-    d2Score: Number,
-    d3Score: Number,
-    d4Score: Number
-  },
-  
-  // 問卷回答
-  surveyResponses: {
-    type: Map,
-    of: Schema.Types.Mixed,
-    default: new Map()
-  },
-  
-  // 用戶基本資訊（選填）
-  demographics: {
-    age: {
-      type: Number,
-      min: [10, '年齡不能小於 10'],
-      max: [120, '年齡不能大於 120']
-    },
-    gender: {
-      type: String,
-      enum: ['male', 'female', 'other', 'prefer_not_to_say']
-    },
-    education: {
-      type: String,
-      enum: ['elementary', 'middle_school', 'high_school', 'bachelor', 'master', 'phd', 'other']
-    },
-    occupation: String
-  },
-  
-  // 用戶裝置資訊
-  deviceInfo: {
-    browser: String,
-    language: String,
-    screenSize: String,
-    timezone: String,
-    platform: String
-  }
-}, 
-{
-  timestamps: true, // 自動添加 createdAt 和 updatedAt
-  versionKey: false // 移除 __v 欄位
 });
 
-// 建立索引以提升查詢性能
-testResultSchema.index({ userId: 1, testDate: -1 });
-testResultSchema.index({ createdAt: -1 });
-testResultSchema.index({ 'analysis.biasLevel': 1 });
-testResultSchema.index({ 'analysis.biasType': 1 });
-
-// 虛擬屬性：計算測試總時長（如果有完成時間）
-testResultSchema.virtual('testDuration').get(function() {
-  if (this.completionTime) {
-    return `${Math.round(this.completionTime / 1000)} 秒`;
-  }
-  return '未知';
-});
-
-// 實例方法：獲取統計摘要
-testResultSchema.methods.getStatsSummary = function() {
-  const allTimes = [
-    ...this.results.maleComputer,
-    ...this.results.femaleSkincare,
-    ...this.results.femaleComputer,
-    ...this.results.maleSkincare
-  ];
-  
-  if (allTimes.length === 0) return null;
-  
-  return {
-    totalTrials: allTimes.length,
-    averageReactionTime: Math.round(allTimes.reduce((sum, time) => sum + time, 0) / allTimes.length),
-    minReactionTime: Math.min(...allTimes),
-    maxReactionTime: Math.max(...allTimes),
-    biasLevel: this.analysis.biasLevel,
-    dScore: this.analysis.dScore.toFixed(3)
-  };
-};
-
-// 靜態方法：獲取偏見分布統計
-testResultSchema.statics.getBiasDistribution = async function() {
-  return this.aggregate([
-    {
-      $group: {
-        _id: '$analysis.biasLevel',
-        count: { $sum: 1 },
-        avgDScore: { $avg: '$analysis.dScore' }
-      }
-    },
-    {
-      $sort: { count: -1 }
+// GET /api/test-results - 取得測試結果列表（管理用途）
+router.get('/', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { page = 1, limit = 20, userId } = req.query;
+        
+        const filter: any = {};
+        if (userId) {
+            filter.userId = userId;
+        }
+        
+        const skip = (Number(page) - 1) * Number(limit);
+        
+        console.log('📋 從 Atlas 查詢測試結果列表...');
+        console.log('🔍 查詢條件:', filter);
+        
+        const results = await (TestResult as any).find(filter)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(Number(limit))
+            .select('-surveyResponses -deviceInfo');
+        
+        const total = await (TestResult as any).countDocuments(filter);
+        
+        console.log(`✅ 從 Atlas 找到 ${results.length} 筆結果，總共 ${total} 筆`);
+        
+        res.json({
+            success: true,
+            data: results,
+            pagination: {
+                page: Number(page),
+                limit: Number(limit),
+                total,
+                pages: Math.ceil(total / Number(limit))
+            }
+        });
+        
+    } catch (error: any) {
+        console.error('❌ 從 Atlas 取得測試結果錯誤:', error);
+        res.status(500).json({
+            success: false,
+            message: '伺服器內部錯誤',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'INTERNAL_SERVER_ERROR'
+        });
     }
-  ]);
-};
-
-// 中間件：儲存前的資料處理
-testResultSchema.pre('save', function(next) {
-  // 確保測試時間不超過當前時間
-  if (this.testDate > new Date()) {
-    this.testDate = new Date();
-  }
-  next();
 });
 
-export default mongoose.model<ITestResult>('TestResult', testResultSchema);
+// GET /api/test-results/:id - 取得特定測試結果
+router.get('/:id', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        
+        console.log('🔍 從 Atlas 查詢特定測試結果:', id);
+        
+        const result = await (TestResult as any).findById(id);
+        
+        if (!result) {
+            console.log('❌ 在 Atlas 中找不到指定的測試結果');
+            res.status(404).json({
+                success: false,
+                message: '找不到指定的測試結果'
+            });
+            return;
+        }
+        
+        console.log('✅ 在 Atlas 中找到測試結果');
+        
+        res.json({
+            success: true,
+            data: result
+        });
+        
+    } catch (error: any) {
+        console.error('❌ 從 Atlas 取得測試結果錯誤:', error);
+        res.status(500).json({
+            success: false,
+            message: '伺服器內部錯誤',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'INTERNAL_SERVER_ERROR'
+        });
+    }
+});
+
+// GET /api/test-results/count/all - 取得總數統計
+router.get('/count/all', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const total = await (TestResult as any).countDocuments();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayCount = await (TestResult as any).countDocuments({
+            createdAt: { $gte: today }
+        });
+
+        console.log(`📊 Atlas 總測試數: ${total}，今日測試數: ${todayCount}`);
+
+        res.json({
+            success: true,
+            data: {
+                total,
+                today: todayCount
+            }
+        });
+    } catch (error: any) {
+        console.error('❌ 從 Atlas 取得統計錯誤:', error);
+        res.status(500).json({
+            success: false,
+            message: '伺服器內部錯誤',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'INTERNAL_SERVER_ERROR'
+        });
+    }
+});
+
+export default router;
